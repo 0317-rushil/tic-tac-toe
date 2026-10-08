@@ -253,7 +253,10 @@
 
     <div class="panel" id="errorPanel" hidden>
       <p id="errorMsg"></p>
-      <button class="action primary" id="restartBtn">Create a new game</button>
+      <div class="actions">
+        <button class="action primary" id="retryBtn" hidden>Try again</button>
+        <button class="action" id="restartBtn">Create a new game</button>
+      </div>
     </div>
   </div>
 
@@ -293,6 +296,20 @@
 (function () {
   const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
   const ROOM_PREFIX = 'ttt-room-';
+  const JOIN_TIMEOUT_MS = 20000;
+
+  // STUN finds a direct path between two devices; it fails on many home/mobile/school
+  // networks (symmetric NAT, strict firewalls), so a TURN relay is included as a fallback.
+  // These are the Open Relay Project's public demo TURN credentials (metered.ca/tools/openrelay) —
+  // free and intended for exactly this kind of small, non-commercial use.
+  const ICE_SERVERS = [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:openrelay.metered.ca:80' },
+    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
+  ];
+  const PEER_OPTS = { config: { iceServers: ICE_SERVERS } };
 
   const hostPanel = document.getElementById('hostPanel');
   const hostMsg = document.getElementById('hostMsg');
@@ -303,6 +320,7 @@
   const joinPanel = document.getElementById('joinPanel');
   const errorPanel = document.getElementById('errorPanel');
   const errorMsg = document.getElementById('errorMsg');
+  const retryBtn = document.getElementById('retryBtn');
   const restartBtn = document.getElementById('restartBtn');
 
   const setupEl = document.getElementById('setup');
@@ -331,6 +349,9 @@
   let conn = null;
   let peer = null;
   let connected = false;
+  let gameStarted = false;
+  let currentRoomCode = null;
+  let joinTimeoutId = null;
 
   function freshState() {
     return { cells: Array(9).fill(null), current: 'X', over: false, result: null };
@@ -474,24 +495,53 @@
     renderGame();
   }
 
-  function showError(text) {
+  function showError(text, opts) {
+    opts = opts || {};
     hostPanel.hidden = true;
     joinPanel.hidden = true;
     errorPanel.hidden = false;
     errorMsg.textContent = text;
+    if (opts.retry) {
+      retryBtn.hidden = false;
+      retryBtn.onclick = opts.retry;
+    } else {
+      retryBtn.hidden = true;
+      retryBtn.onclick = null;
+    }
+  }
+
+  function clearJoinTimeout() {
+    if (joinTimeoutId) {
+      clearTimeout(joinTimeoutId);
+      joinTimeoutId = null;
+    }
   }
 
   function onConnectionReady() {
+    clearJoinTimeout();
     connected = true;
+    gameStarted = true;
     showGame();
   }
 
+  // Fires on a dropped/failed connection. Before the game has actually started this is
+  // usually a failed handshake (network/NAT issue), not a dead room — so retry in place
+  // instead of forcing a brand-new link.
   function onConnectionLost() {
-    if (!gameEl.hidden) {
+    clearJoinTimeout();
+    if (gameStarted) {
       connected = false;
       renderGame();
-    } else {
-      showError("This game link has expired or your friend's device went offline. Create a new one to keep playing.");
+      return;
+    }
+    if (mySymbol === 'X') {
+      hostWait.hidden = false;
+      hostWait.innerHTML = '<span class="spinner"></span> Connection attempt didn\'t go through — still waiting, ask your friend to reopen the link.';
+      conn = null;
+    } else if (currentRoomCode) {
+      showError("Couldn't connect to your friend's game. Make sure they still have the page open with \"Waiting for your friend\" showing, then try again.", {
+        retry: () => { errorPanel.hidden = true; startJoin(currentRoomCode); },
+      });
     }
   }
 
@@ -516,8 +566,9 @@
       return;
     }
     const code = randomCode(5);
+    currentRoomCode = code;
     hostPanel.hidden = false;
-    peer = new Peer(ROOM_PREFIX + code);
+    peer = new Peer(ROOM_PREFIX + code, PEER_OPTS);
 
     peer.on('open', () => {
       mySymbol = 'X';
@@ -547,18 +598,32 @@
   }
 
   function startJoin(code) {
+    currentRoomCode = code;
+    errorPanel.hidden = true;
     joinPanel.hidden = false;
-    peer = new Peer();
+    clearJoinTimeout();
+    peer = new Peer(PEER_OPTS);
     peer.on('open', () => {
       mySymbol = 'O';
       const c = peer.connect(ROOM_PREFIX + code, { reliable: true });
       wireConnection(c);
+      joinTimeoutId = setTimeout(() => {
+        if (!connected) {
+          showError("Still couldn't connect after 20 seconds. Make sure you both have a working internet connection and your friend's page is still open, then try again.", {
+            retry: () => { errorPanel.hidden = true; startJoin(code); },
+          });
+        }
+      }, JOIN_TIMEOUT_MS);
     });
     peer.on('error', (err) => {
       if (err && err.type === 'peer-unavailable') {
+        clearJoinTimeout();
         showError("This game link isn't active anymore — ask your friend to send a fresh one, or create your own game.");
       } else {
-        showError('Could not connect (' + (err && err.type ? err.type : 'network error') + '). Check your internet connection and try again.');
+        clearJoinTimeout();
+        showError('Could not connect (' + (err && err.type ? err.type : 'network error') + '). Check your internet connection and try again.', {
+          retry: () => { errorPanel.hidden = true; startJoin(code); },
+        });
       }
     });
   }
