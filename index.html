@@ -1,0 +1,395 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tic-Tac-Toe</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,650;1,9..144,500&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f6f3ef;
+    --surface: #ffffff;
+    --border: #ddd6ca;
+    --ink: #221d17;
+    --muted: #8c8376;
+    --x: #3454d1;
+    --o: #d9553a;
+    --win: #2f9e6b;
+    --shadow: rgba(40, 32, 20, 0.08);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --bg: #15130f;
+      --surface: #1f1b16;
+      --border: #332d24;
+      --ink: #f1ece2;
+      --muted: #9c9284;
+      --x: #8296ff;
+      --o: #ff8b6e;
+      --win: #4cd38a;
+      --shadow: rgba(0, 0, 0, 0.35);
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+    display: flex;
+    justify-content: center;
+    padding-inline: 16px;
+    padding-block: 40px;
+    min-height: 100vh;
+  }
+
+  main {
+    width: 100%;
+    max-width: 440px;
+  }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin: 0 0 6px;
+  }
+
+  h1 {
+    font-family: "Fraunces", Georgia, serif;
+    font-weight: 650;
+    font-size: clamp(2rem, 7vw, 2.6rem);
+    letter-spacing: -0.01em;
+    margin: 0 0 24px;
+    text-wrap: balance;
+  }
+
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 2rem;
+    margin-bottom: 18px;
+    font-size: 1.05rem;
+    font-weight: 500;
+  }
+
+  .dot {
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    flex: none;
+    transition: background 0.2s ease;
+  }
+  .dot.x { background: var(--x); }
+  .dot.o { background: var(--o); }
+  .dot.win { background: var(--win); }
+
+  .board-wrap {
+    position: relative;
+    margin-bottom: 22px;
+  }
+
+  .board {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 7px;
+    background: var(--border);
+    border-radius: 18px;
+    padding: 7px;
+    border: 1px solid var(--border);
+    box-shadow: 0 16px 34px var(--shadow);
+  }
+
+  .cell {
+    aspect-ratio: 1;
+    background: var(--surface);
+    border: none;
+    border-radius: 13px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    position: relative;
+    transition: background 0.15s ease;
+  }
+  .cell:hover:not(:disabled) { background: color-mix(in srgb, var(--surface) 80%, var(--border)); }
+  .cell:disabled { cursor: default; }
+  .cell:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
+
+  .cell svg { width: 46%; height: 46%; overflow: visible; }
+
+  .mark-path {
+    fill: none;
+    stroke-width: 9;
+    stroke-linecap: round;
+    stroke-dasharray: 140;
+    stroke-dashoffset: 140;
+    animation: draw 0.28s ease forwards;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .mark-path { animation: none; stroke-dashoffset: 0; }
+  }
+  @keyframes draw { to { stroke-dashoffset: 0; } }
+
+  .win-line {
+    position: absolute;
+    inset: 7px;
+    pointer-events: none;
+  }
+  .win-line line {
+    stroke: var(--win);
+    stroke-width: 6;
+    stroke-linecap: round;
+    stroke-dasharray: 300;
+    stroke-dashoffset: 300;
+    animation: strike 0.35s ease forwards;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .win-line line { animation: none; stroke-dashoffset: 0; }
+  }
+  @keyframes strike { to { stroke-dashoffset: 0; } }
+
+  .scoreboard {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+    margin-bottom: 20px;
+  }
+  .score-cell {
+    padding: 12px 8px;
+    text-align: center;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+  }
+  .score-cell:last-child { border-right: none; }
+  .score-label {
+    font-size: 0.68rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 4px;
+  }
+  .score-value {
+    font-family: "IBM Plex Mono", monospace;
+    font-variant-numeric: tabular-nums;
+    font-size: 1.3rem;
+    font-weight: 600;
+  }
+  .score-cell.x .score-value { color: var(--x); }
+  .score-cell.o .score-value { color: var(--o); }
+
+  .actions {
+    display: flex;
+    gap: 10px;
+  }
+  button.action {
+    appearance: none;
+    border: 1px solid var(--border);
+    border-radius: 11px;
+    padding: 11px 16px;
+    font: inherit;
+    font-weight: 600;
+    font-size: 0.9rem;
+    cursor: pointer;
+    background: var(--surface);
+    color: var(--ink);
+    flex: 1;
+  }
+  button.action.primary {
+    background: var(--ink);
+    color: var(--bg);
+    border-color: var(--ink);
+  }
+  button.action:active { transform: translateY(1px); }
+
+  .hint {
+    margin-top: 16px;
+    font-size: 0.78rem;
+    color: var(--muted);
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<main>
+  <p class="eyebrow">Pass &amp; play · 2 players</p>
+  <h1>Tic&#8209;Tac&#8209;Toe</h1>
+
+  <div class="status-row" id="status"></div>
+
+  <div class="board-wrap">
+    <div class="board" id="board"></div>
+    <svg class="win-line" id="winLine" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
+  </div>
+
+  <div class="scoreboard">
+    <div class="score-cell x">
+      <div class="score-label">Player X</div>
+      <div class="score-value" id="scoreX">0</div>
+    </div>
+    <div class="score-cell">
+      <div class="score-label">Draws</div>
+      <div class="score-value" id="scoreD">0</div>
+    </div>
+    <div class="score-cell o">
+      <div class="score-label">Player O</div>
+      <div class="score-value" id="scoreO">0</div>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="action primary" id="nextBtn">Next round</button>
+    <button class="action" id="matchBtn">Reset match</button>
+  </div>
+
+  <p class="hint">Same device, same screen — X always opens.</p>
+</main>
+
+<script>
+(function () {
+  const boardEl = document.getElementById('board');
+  const statusEl = document.getElementById('status');
+  const winLineEl = document.getElementById('winLine');
+  const nextBtn = document.getElementById('nextBtn');
+  const matchBtn = document.getElementById('matchBtn');
+  const scoreXEl = document.getElementById('scoreX');
+  const scoreOEl = document.getElementById('scoreO');
+  const scoreDEl = document.getElementById('scoreD');
+
+  const WIN_LINES = [
+    [0,1,2],[3,4,5],[6,7,8],
+    [0,3,6],[1,4,7],[2,5,8],
+    [0,4,8],[2,4,6],
+  ];
+
+  const MARK_PATHS = {
+    X: ['M 22 22 L 78 78', 'M 78 22 L 22 78'],
+    O: ['M 50 18 A 32 32 0 1 1 49.9 18'],
+  };
+
+  function state() {
+    return {
+      cells: Array(9).fill(null),
+      current: 'X',
+      over: false,
+      result: null,
+    };
+  }
+
+  let g = state();
+  let scores = { X: 0, O: 0, D: 0 };
+
+  function checkResult(cells) {
+    for (const line of WIN_LINES) {
+      const [a, b, c] = line;
+      if (cells[a] && cells[a] === cells[b] && cells[a] === cells[c]) {
+        return { winner: cells[a], line };
+      }
+    }
+    if (cells.every(Boolean)) return { winner: null, line: null };
+    return null;
+  }
+
+  function cellCenter(i) {
+    const col = i % 3, row = Math.floor(i / 3);
+    return { x: col * 33.33 + 16.67, y: row * 33.33 + 16.67 };
+  }
+
+  function drawWinLine(line) {
+    winLineEl.innerHTML = '';
+    if (!line) return;
+    const [a, , c] = line;
+    const p1 = cellCenter(a), p2 = cellCenter(c);
+    const dx = (p2.x - p1.x) * 0.18, dy = (p2.y - p1.y) * 0.18;
+    const el = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    el.setAttribute('x1', p1.x - dx);
+    el.setAttribute('y1', p1.y - dy);
+    el.setAttribute('x2', p2.x + dx);
+    el.setAttribute('y2', p2.y + dy);
+    winLineEl.appendChild(el);
+  }
+
+  function markSvg(player) {
+    const color = player === 'X' ? 'var(--x)' : 'var(--o)';
+    const paths = MARK_PATHS[player].map(d =>
+      `<path class="mark-path" d="${d}" stroke="${color}"></path>`
+    ).join('');
+    return `<svg viewBox="0 0 100 100">${paths}</svg>`;
+  }
+
+  function render() {
+    boardEl.innerHTML = '';
+    const winLine = g.result && g.result.line ? g.result.line : [];
+
+    g.cells.forEach((val, i) => {
+      const btn = document.createElement('button');
+      btn.className = 'cell' + (winLine.includes(i) ? ' win' : '');
+      btn.disabled = !!val || g.over;
+      btn.setAttribute('aria-label', 'Cell ' + (i + 1) + (val ? ', ' + val : ', empty'));
+      if (val) btn.innerHTML = markSvg(val);
+      btn.addEventListener('click', () => handleMove(i));
+      boardEl.appendChild(btn);
+    });
+
+    drawWinLine(g.result ? g.result.line : null);
+
+    if (g.over) {
+      if (g.result.winner) {
+        statusEl.innerHTML = `<span class="dot win"></span><span>Player ${g.result.winner} wins this round</span>`;
+      } else {
+        statusEl.innerHTML = `<span class="dot" style="background:var(--muted)"></span><span>Round drawn</span>`;
+      }
+    } else {
+      const dotClass = g.current === 'X' ? 'x' : 'o';
+      statusEl.innerHTML = `<span class="dot ${dotClass}"></span><span>Player ${g.current} to move</span>`;
+    }
+
+    scoreXEl.textContent = scores.X;
+    scoreOEl.textContent = scores.O;
+    scoreDEl.textContent = scores.D;
+  }
+
+  function handleMove(i) {
+    if (g.over || g.cells[i]) return;
+    g.cells[i] = g.current;
+    const result = checkResult(g.cells);
+    if (result) {
+      g.over = true;
+      g.result = result;
+      if (result.winner) scores[result.winner]++;
+      else scores.D++;
+    } else {
+      g.current = g.current === 'X' ? 'O' : 'X';
+    }
+    render();
+  }
+
+  function nextRound() {
+    g = state();
+    render();
+  }
+
+  function resetMatch() {
+    scores = { X: 0, O: 0, D: 0 };
+    nextRound();
+  }
+
+  nextBtn.addEventListener('click', nextRound);
+  matchBtn.addEventListener('click', resetMatch);
+  render();
+})();
+</script>
+</body>
+</html>
