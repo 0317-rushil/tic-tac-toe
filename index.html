@@ -3,10 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Tic-Tac-Toe</title>
+<title>Tic-Tac-Toe Online</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,650;1,9..144,500&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <style>
   :root {
     color-scheme: light;
@@ -18,6 +19,7 @@
     --x: #3454d1;
     --o: #d9553a;
     --win: #2f9e6b;
+    --bad: #c23b3b;
     --shadow: rgba(40, 32, 20, 0.08);
   }
   @media (prefers-color-scheme: dark) {
@@ -31,6 +33,7 @@
       --x: #8296ff;
       --o: #ff8b6e;
       --win: #4cd38a;
+      --bad: #ff6b6b;
       --shadow: rgba(0, 0, 0, 0.35);
     }
   }
@@ -49,10 +52,7 @@
     min-height: 100vh;
   }
 
-  main {
-    width: 100%;
-    max-width: 440px;
-  }
+  main { width: 100%; max-width: 440px; }
 
   .eyebrow {
     font-family: "IBM Plex Mono", monospace;
@@ -72,6 +72,48 @@
     text-wrap: balance;
   }
 
+  [hidden] { display: none !important; }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 22px;
+    margin-bottom: 20px;
+  }
+  .panel p { margin: 0 0 14px; line-height: 1.5; }
+  .panel p:last-child { margin-bottom: 0; }
+
+  .link-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+  }
+  .link-row input {
+    flex: 1;
+    min-width: 0;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.82rem;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--ink);
+  }
+
+  .spinner {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    border-top-color: var(--muted);
+    animation: spin 0.8s linear infinite;
+    display: inline-block;
+    vertical-align: -2px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }
+
   .status-row {
     display: flex;
     align-items: center;
@@ -81,6 +123,7 @@
     font-size: 1.05rem;
     font-weight: 500;
   }
+  .status-row.error { color: var(--bad); }
 
   .dot {
     width: 11px;
@@ -92,11 +135,10 @@
   .dot.x { background: var(--x); }
   .dot.o { background: var(--o); }
   .dot.win { background: var(--win); }
+  .dot.bad { background: var(--bad); }
+  .dot.wait { background: var(--muted); }
 
-  .board-wrap {
-    position: relative;
-    margin-bottom: 22px;
-  }
+  .board-wrap { position: relative; margin-bottom: 22px; }
 
   .board {
     display: grid;
@@ -108,6 +150,7 @@
     border: 1px solid var(--border);
     box-shadow: 0 16px 34px var(--shadow);
   }
+  .board.disabled { opacity: 0.55; }
 
   .cell {
     aspect-ratio: 1;
@@ -125,7 +168,6 @@
   .cell:hover:not(:disabled) { background: color-mix(in srgb, var(--surface) 80%, var(--border)); }
   .cell:disabled { cursor: default; }
   .cell:focus-visible { outline: 2px solid var(--ink); outline-offset: -2px; }
-
   .cell svg { width: 46%; height: 46%; overflow: visible; }
 
   .mark-path {
@@ -136,16 +178,10 @@
     stroke-dashoffset: 140;
     animation: draw 0.28s ease forwards;
   }
-  @media (prefers-reduced-motion: reduce) {
-    .mark-path { animation: none; stroke-dashoffset: 0; }
-  }
+  @media (prefers-reduced-motion: reduce) { .mark-path { animation: none; stroke-dashoffset: 0; } }
   @keyframes draw { to { stroke-dashoffset: 0; } }
 
-  .win-line {
-    position: absolute;
-    inset: 7px;
-    pointer-events: none;
-  }
+  .win-line { position: absolute; inset: 7px; pointer-events: none; }
   .win-line line {
     stroke: var(--win);
     stroke-width: 6;
@@ -154,9 +190,7 @@
     stroke-dashoffset: 300;
     animation: strike 0.35s ease forwards;
   }
-  @media (prefers-reduced-motion: reduce) {
-    .win-line line { animation: none; stroke-dashoffset: 0; }
-  }
+  @media (prefers-reduced-motion: reduce) { .win-line line { animation: none; stroke-dashoffset: 0; } }
   @keyframes strike { to { stroke-dashoffset: 0; } }
 
   .scoreboard {
@@ -167,33 +201,14 @@
     overflow: hidden;
     margin-bottom: 20px;
   }
-  .score-cell {
-    padding: 12px 8px;
-    text-align: center;
-    background: var(--surface);
-    border-right: 1px solid var(--border);
-  }
+  .score-cell { padding: 12px 8px; text-align: center; background: var(--surface); border-right: 1px solid var(--border); }
   .score-cell:last-child { border-right: none; }
-  .score-label {
-    font-size: 0.68rem;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--muted);
-    margin-bottom: 4px;
-  }
-  .score-value {
-    font-family: "IBM Plex Mono", monospace;
-    font-variant-numeric: tabular-nums;
-    font-size: 1.3rem;
-    font-weight: 600;
-  }
+  .score-label { font-size: 0.68rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+  .score-value { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; font-size: 1.3rem; font-weight: 600; }
   .score-cell.x .score-value { color: var(--x); }
   .score-cell.o .score-value { color: var(--o); }
 
-  .actions {
-    display: flex;
-    gap: 10px;
-  }
+  .actions { display: flex; gap: 10px; }
   button.action {
     appearance: none;
     border: 1px solid var(--border);
@@ -207,58 +222,92 @@
     color: var(--ink);
     flex: 1;
   }
-  button.action.primary {
-    background: var(--ink);
-    color: var(--bg);
-    border-color: var(--ink);
-  }
-  button.action:active { transform: translateY(1px); }
+  button.action.primary { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  button.action:disabled { opacity: 0.5; cursor: default; }
+  button.action:active:not(:disabled) { transform: translateY(1px); }
 
-  .hint {
-    margin-top: 16px;
-    font-size: 0.78rem;
-    color: var(--muted);
-    text-align: center;
-  }
+  .hint { margin-top: 16px; font-size: 0.78rem; color: var(--muted); text-align: center; }
+  .you-tag { font-size: 0.78rem; color: var(--muted); margin-bottom: 18px; text-align: center; }
+  .you-tag b.x { color: var(--x); }
+  .you-tag b.o { color: var(--o); }
 </style>
 </head>
 <body>
 <main>
-  <p class="eyebrow">Pass &amp; play · 2 players</p>
+  <p class="eyebrow">Online · 2 players, 2 devices</p>
   <h1>Tic&#8209;Tac&#8209;Toe</h1>
 
-  <div class="status-row" id="status"></div>
-
-  <div class="board-wrap">
-    <div class="board" id="board"></div>
-    <svg class="win-line" id="winLine" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
-  </div>
-
-  <div class="scoreboard">
-    <div class="score-cell x">
-      <div class="score-label">Player X</div>
-      <div class="score-value" id="scoreX">0</div>
+  <div id="setup">
+    <div class="panel" id="hostPanel" hidden>
+      <p id="hostMsg"><span class="spinner"></span> Creating your game link…</p>
+      <div class="link-row" id="linkRow" hidden>
+        <input type="text" id="linkInput" readonly>
+        <button class="action primary" id="copyBtn" style="flex:none;">Copy</button>
+      </div>
+      <p id="hostWait" hidden><span class="spinner"></span> Waiting for your friend to open the link…</p>
     </div>
-    <div class="score-cell">
-      <div class="score-label">Draws</div>
-      <div class="score-value" id="scoreD">0</div>
+
+    <div class="panel" id="joinPanel" hidden>
+      <p><span class="spinner"></span> Connecting to your friend's game…</p>
     </div>
-    <div class="score-cell o">
-      <div class="score-label">Player O</div>
-      <div class="score-value" id="scoreO">0</div>
+
+    <div class="panel" id="errorPanel" hidden>
+      <p id="errorMsg"></p>
+      <button class="action primary" id="restartBtn">Create a new game</button>
     </div>
   </div>
 
-  <div class="actions">
-    <button class="action primary" id="nextBtn">Next round</button>
-    <button class="action" id="matchBtn">Reset match</button>
-  </div>
+  <div id="game" hidden>
+    <p class="you-tag">You are playing as <b id="youAre"></b></p>
+    <div class="status-row" id="status"></div>
 
-  <p class="hint">Same device, same screen — X always opens.</p>
+    <div class="board-wrap">
+      <div class="board" id="board"></div>
+      <svg class="win-line" id="winLine" viewBox="0 0 100 100" preserveAspectRatio="none"></svg>
+    </div>
+
+    <div class="scoreboard">
+      <div class="score-cell x">
+        <div class="score-label">Player X</div>
+        <div class="score-value" id="scoreX">0</div>
+      </div>
+      <div class="score-cell">
+        <div class="score-label">Draws</div>
+        <div class="score-value" id="scoreD">0</div>
+      </div>
+      <div class="score-cell o">
+        <div class="score-label">Player O</div>
+        <div class="score-value" id="scoreO">0</div>
+      </div>
+    </div>
+
+    <div class="actions">
+      <button class="action primary" id="nextBtn">Next round</button>
+      <button class="action" id="matchBtn">Reset match</button>
+    </div>
+    <p class="hint">Moves sync live between both devices over a direct connection.</p>
+  </div>
 </main>
 
 <script>
 (function () {
+  const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  const ROOM_PREFIX = 'ttt-room-';
+
+  const hostPanel = document.getElementById('hostPanel');
+  const hostMsg = document.getElementById('hostMsg');
+  const linkRow = document.getElementById('linkRow');
+  const linkInput = document.getElementById('linkInput');
+  const copyBtn = document.getElementById('copyBtn');
+  const hostWait = document.getElementById('hostWait');
+  const joinPanel = document.getElementById('joinPanel');
+  const errorPanel = document.getElementById('errorPanel');
+  const errorMsg = document.getElementById('errorMsg');
+  const restartBtn = document.getElementById('restartBtn');
+
+  const setupEl = document.getElementById('setup');
+  const gameEl = document.getElementById('game');
+  const youAreEl = document.getElementById('youAre');
   const boardEl = document.getElementById('board');
   const statusEl = document.getElementById('status');
   const winLineEl = document.getElementById('winLine');
@@ -273,30 +322,26 @@
     [0,3,6],[1,4,7],[2,5,8],
     [0,4,8],[2,4,6],
   ];
-
   const MARK_PATHS = {
     X: ['M 22 22 L 78 78', 'M 78 22 L 22 78'],
     O: ['M 50 18 A 32 32 0 1 1 49.9 18'],
   };
 
-  function state() {
-    return {
-      cells: Array(9).fill(null),
-      current: 'X',
-      over: false,
-      result: null,
-    };
-  }
+  let mySymbol = null;
+  let conn = null;
+  let peer = null;
+  let connected = false;
 
-  let g = state();
+  function freshState() {
+    return { cells: Array(9).fill(null), current: 'X', over: false, result: null };
+  }
+  let g = freshState();
   let scores = { X: 0, O: 0, D: 0 };
 
   function checkResult(cells) {
     for (const line of WIN_LINES) {
       const [a, b, c] = line;
-      if (cells[a] && cells[a] === cells[b] && cells[a] === cells[c]) {
-        return { winner: cells[a], line };
-      }
+      if (cells[a] && cells[a] === cells[b] && cells[a] === cells[c]) return { winner: cells[a], line };
     }
     if (cells.every(Boolean)) return { winner: null, line: null };
     return null;
@@ -323,47 +368,54 @@
 
   function markSvg(player) {
     const color = player === 'X' ? 'var(--x)' : 'var(--o)';
-    const paths = MARK_PATHS[player].map(d =>
-      `<path class="mark-path" d="${d}" stroke="${color}"></path>`
-    ).join('');
+    const paths = MARK_PATHS[player].map(d => `<path class="mark-path" d="${d}" stroke="${color}"></path>`).join('');
     return `<svg viewBox="0 0 100 100">${paths}</svg>`;
   }
 
-  function render() {
+  function renderGame() {
     boardEl.innerHTML = '';
     const winLine = g.result && g.result.line ? g.result.line : [];
+    const myTurn = connected && !g.over && g.current === mySymbol;
+    boardEl.classList.toggle('disabled', !connected);
 
     g.cells.forEach((val, i) => {
       const btn = document.createElement('button');
       btn.className = 'cell' + (winLine.includes(i) ? ' win' : '');
-      btn.disabled = !!val || g.over;
+      btn.disabled = !!val || g.over || !myTurn;
       btn.setAttribute('aria-label', 'Cell ' + (i + 1) + (val ? ', ' + val : ', empty'));
       if (val) btn.innerHTML = markSvg(val);
-      btn.addEventListener('click', () => handleMove(i));
+      btn.addEventListener('click', () => handleLocalMove(i));
       boardEl.appendChild(btn);
     });
 
     drawWinLine(g.result ? g.result.line : null);
 
-    if (g.over) {
+    if (!connected) {
+      statusEl.className = 'status-row error';
+      statusEl.innerHTML = `<span class="dot bad"></span><span>Connection lost — ask for a fresh link to keep playing</span>`;
+    } else if (g.over) {
+      statusEl.className = 'status-row';
       if (g.result.winner) {
-        statusEl.innerHTML = `<span class="dot win"></span><span>Player ${g.result.winner} wins this round</span>`;
+        const youWon = g.result.winner === mySymbol;
+        statusEl.innerHTML = `<span class="dot win"></span><span>${youWon ? 'You win' : 'Player ' + g.result.winner + ' wins'} this round</span>`;
       } else {
-        statusEl.innerHTML = `<span class="dot" style="background:var(--muted)"></span><span>Round drawn</span>`;
+        statusEl.innerHTML = `<span class="dot wait"></span><span>Round drawn</span>`;
       }
     } else {
+      statusEl.className = 'status-row';
       const dotClass = g.current === 'X' ? 'x' : 'o';
-      statusEl.innerHTML = `<span class="dot ${dotClass}"></span><span>Player ${g.current} to move</span>`;
+      statusEl.innerHTML = `<span class="dot ${dotClass}"></span><span>${myTurn ? 'Your move' : "Waiting for opponent's move"}</span>`;
     }
 
+    nextBtn.disabled = !connected;
+    matchBtn.disabled = !connected;
     scoreXEl.textContent = scores.X;
     scoreOEl.textContent = scores.O;
     scoreDEl.textContent = scores.D;
   }
 
-  function handleMove(i) {
-    if (g.over || g.cells[i]) return;
-    g.cells[i] = g.current;
+  function applyMove(index, symbol) {
+    g.cells[index] = symbol;
     const result = checkResult(g.cells);
     if (result) {
       g.over = true;
@@ -373,22 +425,169 @@
     } else {
       g.current = g.current === 'X' ? 'O' : 'X';
     }
-    render();
   }
 
-  function nextRound() {
-    g = state();
-    render();
+  function handleLocalMove(i) {
+    if (!connected || g.over || g.cells[i] || g.current !== mySymbol) return;
+    applyMove(i, mySymbol);
+    send({ type: 'move', index: i });
+    renderGame();
   }
 
-  function resetMatch() {
+  function nextRound(fromRemote) {
+    g = freshState();
+    renderGame();
+    if (!fromRemote) send({ type: 'nextRound' });
+  }
+
+  function resetMatch(fromRemote) {
     scores = { X: 0, O: 0, D: 0 };
-    nextRound();
+    g = freshState();
+    renderGame();
+    if (!fromRemote) send({ type: 'resetMatch' });
   }
 
-  nextBtn.addEventListener('click', nextRound);
-  matchBtn.addEventListener('click', resetMatch);
-  render();
+  function send(msg) {
+    if (conn && conn.open) conn.send(msg);
+  }
+
+  function handleRemoteMessage(msg) {
+    if (!msg || typeof msg !== 'object') return;
+    if (msg.type === 'move') {
+      const opponent = mySymbol === 'X' ? 'O' : 'X';
+      if (!g.over && g.cells[msg.index] == null && g.current === opponent) {
+        applyMove(msg.index, opponent);
+        renderGame();
+      }
+    } else if (msg.type === 'nextRound') {
+      nextRound(true);
+    } else if (msg.type === 'resetMatch') {
+      resetMatch(true);
+    }
+  }
+
+  function showGame() {
+    setupEl.hidden = true;
+    gameEl.hidden = false;
+    youAreEl.textContent = mySymbol;
+    youAreEl.className = mySymbol.toLowerCase();
+    renderGame();
+  }
+
+  function showError(text) {
+    hostPanel.hidden = true;
+    joinPanel.hidden = true;
+    errorPanel.hidden = false;
+    errorMsg.textContent = text;
+  }
+
+  function onConnectionReady() {
+    connected = true;
+    showGame();
+  }
+
+  function onConnectionLost() {
+    if (!gameEl.hidden) {
+      connected = false;
+      renderGame();
+    } else {
+      showError("This game link has expired or your friend's device went offline. Create a new one to keep playing.");
+    }
+  }
+
+  function wireConnection(c) {
+    conn = c;
+    conn.on('open', onConnectionReady);
+    conn.on('data', handleRemoteMessage);
+    conn.on('close', onConnectionLost);
+    conn.on('error', onConnectionLost);
+  }
+
+  function randomCode(len) {
+    let s = '';
+    for (let i = 0; i < len; i++) s += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
+    return s;
+  }
+
+  function startHost(attempt) {
+    attempt = attempt || 0;
+    if (attempt > 4) {
+      showError('Could not create a game room right now. Please try again in a moment.');
+      return;
+    }
+    const code = randomCode(5);
+    hostPanel.hidden = false;
+    peer = new Peer(ROOM_PREFIX + code);
+
+    peer.on('open', () => {
+      mySymbol = 'X';
+      const url = new URL(window.location.href);
+      url.search = '?room=' + code;
+      linkInput.value = url.toString();
+      hostMsg.innerHTML = 'Share this link with your friend:';
+      linkRow.hidden = false;
+      hostWait.hidden = false;
+    });
+
+    peer.on('connection', (c) => {
+      hostWait.hidden = true;
+      wireConnection(c);
+    });
+
+    peer.on('error', (err) => {
+      if (err && err.type === 'unavailable-id') {
+        peer.destroy();
+        startHost(attempt + 1);
+      } else if (err && err.type === 'peer-unavailable') {
+        // not relevant on host side
+      } else {
+        showError('Could not set up the connection (' + (err && err.type ? err.type : 'network error') + '). Check your internet connection and try again.');
+      }
+    });
+  }
+
+  function startJoin(code) {
+    joinPanel.hidden = false;
+    peer = new Peer();
+    peer.on('open', () => {
+      mySymbol = 'O';
+      const c = peer.connect(ROOM_PREFIX + code, { reliable: true });
+      wireConnection(c);
+    });
+    peer.on('error', (err) => {
+      if (err && err.type === 'peer-unavailable') {
+        showError("This game link isn't active anymore — ask your friend to send a fresh one, or create your own game.");
+      } else {
+        showError('Could not connect (' + (err && err.type ? err.type : 'network error') + '). Check your internet connection and try again.');
+      }
+    });
+  }
+
+  copyBtn.addEventListener('click', () => {
+    const text = linkInput.value;
+    navigator.clipboard.writeText(text).then(() => {
+      copyBtn.textContent = 'Copied';
+      setTimeout(() => { copyBtn.textContent = 'Copy'; }, 1500);
+    }).catch(() => {
+      linkInput.select();
+      linkInput.setSelectionRange(0, 99999);
+    });
+  });
+
+  restartBtn.addEventListener('click', () => {
+    window.location.href = window.location.pathname;
+  });
+
+  nextBtn.addEventListener('click', () => nextRound(false));
+  matchBtn.addEventListener('click', () => resetMatch(false));
+
+  const params = new URLSearchParams(window.location.search);
+  const room = params.get('room');
+  if (room) {
+    startJoin(room.toUpperCase());
+  } else {
+    startHost();
+  }
 })();
 </script>
 </body>
