@@ -7,7 +7,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,500;0,9..144,650;1,9..144,500&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
-<script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
 <style>
   :root {
     color-scheme: light;
@@ -295,21 +294,8 @@
 <script>
 (function () {
   const CODE_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-  const ROOM_PREFIX = 'ttt-room-';
+  const RELAY_URL = 'wss://tic-tac-toe-relay.tic-tac-toe-relay-cf.workers.dev';
   const JOIN_TIMEOUT_MS = 20000;
-
-  // STUN finds a direct path between two devices; it fails on many home/mobile/school
-  // networks (symmetric NAT, strict firewalls), so a TURN relay is included as a fallback.
-  // These are the Open Relay Project's public demo TURN credentials (metered.ca/tools/openrelay) —
-  // free and intended for exactly this kind of small, non-commercial use.
-  const ICE_SERVERS = [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:openrelay.metered.ca:80' },
-    { urls: 'turn:openrelay.metered.ca:80', username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:openrelay.metered.ca:443', username: 'openrelayproject', credential: 'openrelayproject' },
-    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' },
-  ];
-  const PEER_OPTS = { config: { iceServers: ICE_SERVERS } };
 
   const hostPanel = document.getElementById('hostPanel');
   const hostMsg = document.getElementById('hostMsg');
@@ -346,12 +332,12 @@
   };
 
   let mySymbol = null;
-  let conn = null;
-  let peer = null;
+  let socket = null;
   let connected = false;
   let gameStarted = false;
   let currentRoomCode = null;
   let joinTimeoutId = null;
+  let reconnectAttempts = 0;
 
   function freshState() {
     return { cells: Array(9).fill(null), current: 'X', over: false, result: null };
@@ -413,7 +399,7 @@
 
     if (!connected) {
       statusEl.className = 'status-row error';
-      statusEl.innerHTML = `<span class="dot bad"></span><span>Connection lost — ask for a fresh link to keep playing</span>`;
+      statusEl.innerHTML = `<span class="dot bad"></span><span>Connection interrupted — reconnecting…</span>`;
     } else if (g.over) {
       statusEl.className = 'status-row';
       if (g.result.winner) {
@@ -469,7 +455,7 @@
   }
 
   function send(msg) {
-    if (conn && conn.open) conn.send(msg);
+    if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(msg));
   }
 
   function handleRemoteMessage(msg) {
@@ -517,115 +503,96 @@
     }
   }
 
-  function onConnectionReady() {
-    clearJoinTimeout();
-    connected = true;
-    gameStarted = true;
-    showGame();
-  }
-
-  // Fires on a dropped/failed connection. Before the game has actually started this is
-  // usually a failed handshake (network/NAT issue), not a dead room — so retry in place
-  // instead of forcing a brand-new link.
-  function onConnectionLost() {
-    clearJoinTimeout();
-    if (gameStarted) {
-      connected = false;
-      renderGame();
-      return;
-    }
-    if (mySymbol === 'X') {
-      hostWait.hidden = false;
-      hostWait.innerHTML = '<span class="spinner"></span> Connection attempt didn\'t go through — still waiting, ask your friend to reopen the link.';
-      conn = null;
-    } else if (currentRoomCode) {
-      showError("Couldn't connect to your friend's game. Make sure they still have the page open with \"Waiting for your friend\" showing, then try again.", {
-        retry: () => { errorPanel.hidden = true; startJoin(currentRoomCode); },
-      });
-    }
-  }
-
-  function wireConnection(c) {
-    conn = c;
-    conn.on('open', onConnectionReady);
-    conn.on('data', handleRemoteMessage);
-    conn.on('close', onConnectionLost);
-    conn.on('error', onConnectionLost);
-  }
-
   function randomCode(len) {
     let s = '';
     for (let i = 0; i < len; i++) s += CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)];
     return s;
   }
 
-  function startHost(attempt) {
-    attempt = attempt || 0;
-    if (attempt > 4) {
-      showError('Could not create a game room right now. Please try again in a moment.');
-      return;
-    }
-    const code = randomCode(5);
+  // Everything flows through one small relay server that forwards messages between the
+  // two players' sockets (see tic-tac-toe-relay-cf). The relay assigns X to whichever
+  // socket reaches a room code first and O to the second, then echoes 'peer-joined' to
+  // both once they're paired. Reconnecting with the same room code reclaims the same seat,
+  // so a dropped connection (either side) recovers on its own instead of killing the room.
+  function connect(code) {
     currentRoomCode = code;
-    hostPanel.hidden = false;
-    peer = new Peer(ROOM_PREFIX + code, PEER_OPTS);
+    clearJoinTimeout();
+    errorPanel.hidden = true;
+    if (socket) {
+      socket.onopen = socket.onmessage = socket.onclose = socket.onerror = null;
+      try { socket.close(); } catch (e) { /* already closed */ }
+    }
 
-    peer.on('open', () => {
-      mySymbol = 'X';
-      const url = new URL(window.location.href);
-      url.search = '?room=' + code;
-      linkInput.value = url.toString();
-      hostMsg.innerHTML = 'Share this link with your friend:';
-      linkRow.hidden = false;
-      hostWait.hidden = false;
-    });
+    socket = new WebSocket(RELAY_URL + '?room=' + encodeURIComponent(code));
 
-    peer.on('connection', (c) => {
-      hostWait.hidden = true;
-      wireConnection(c);
-    });
+    socket.onopen = () => { reconnectAttempts = 0; };
 
-    peer.on('error', (err) => {
-      if (err && err.type === 'unavailable-id') {
-        peer.destroy();
-        startHost(attempt + 1);
-      } else if (err && err.type === 'peer-unavailable') {
-        // not relevant on host side
+    socket.onmessage = (evt) => {
+      let msg;
+      try { msg = JSON.parse(evt.data); } catch (e) { return; }
+
+      if (msg.type === 'assigned') {
+        mySymbol = msg.role;
+        if (gameStarted) return; // reconnect mid-game — no setup UI to touch
+        if (mySymbol === 'X') {
+          const url = new URL(window.location.href);
+          url.search = '?room=' + code;
+          linkInput.value = url.toString();
+          hostPanel.hidden = false;
+          hostMsg.innerHTML = 'Share this link with your friend:';
+          linkRow.hidden = false;
+          hostWait.hidden = false;
+          hostWait.innerHTML = '<span class="spinner"></span> Waiting for your friend to open the link…';
+        } else {
+          joinPanel.hidden = false;
+          clearJoinTimeout();
+          joinTimeoutId = setTimeout(() => {
+            if (!connected) {
+              showError('Still couldn’t connect after 20 seconds. Make sure your friend’s page is open and showing “Waiting for your friend”, then try again.', {
+                retry: () => { reconnectAttempts = 0; connect(code); },
+              });
+            }
+          }, JOIN_TIMEOUT_MS);
+        }
+      } else if (msg.type === 'peer-joined') {
+        clearJoinTimeout();
+        connected = true;
+        if (!gameStarted) {
+          gameStarted = true;
+          showGame();
+        } else {
+          renderGame();
+        }
+      } else if (msg.type === 'peer-left') {
+        connected = false;
+        renderGame();
       } else {
-        showError('Could not set up the connection (' + (err && err.type ? err.type : 'network error') + '). Check your internet connection and try again.');
+        handleRemoteMessage(msg);
       }
-    });
+    };
+
+    socket.onclose = () => onSocketDown(code);
+    socket.onerror = () => onSocketDown(code);
   }
 
-  function startJoin(code) {
-    currentRoomCode = code;
-    errorPanel.hidden = true;
-    joinPanel.hidden = false;
+  function onSocketDown(code) {
     clearJoinTimeout();
-    peer = new Peer(PEER_OPTS);
-    peer.on('open', () => {
-      mySymbol = 'O';
-      const c = peer.connect(ROOM_PREFIX + code, { reliable: true });
-      wireConnection(c);
-      joinTimeoutId = setTimeout(() => {
-        if (!connected) {
-          showError("Still couldn't connect after 20 seconds. Make sure you both have a working internet connection and your friend's page is still open, then try again.", {
-            retry: () => { errorPanel.hidden = true; startJoin(code); },
-          });
-        }
-      }, JOIN_TIMEOUT_MS);
-    });
-    peer.on('error', (err) => {
-      if (err && err.type === 'peer-unavailable') {
-        clearJoinTimeout();
-        showError("This game link isn't active anymore — ask your friend to send a fresh one, or create your own game.");
-      } else {
-        clearJoinTimeout();
-        showError('Could not connect (' + (err && err.type ? err.type : 'network error') + '). Check your internet connection and try again.', {
-          retry: () => { errorPanel.hidden = true; startJoin(code); },
-        });
-      }
-    });
+    connected = false;
+    if (gameStarted) renderGame();
+
+    reconnectAttempts++;
+    if (reconnectAttempts > 8) {
+      showError('Couldn’t keep a connection to the relay server going. Check your internet connection, then try again.', {
+        retry: () => { reconnectAttempts = 0; connect(code); },
+      });
+      return;
+    }
+    if (!gameStarted && mySymbol === 'X') {
+      hostWait.hidden = false;
+      hostWait.innerHTML = '<span class="spinner"></span> Reconnecting…';
+    }
+    const delay = Math.min(800 * reconnectAttempts, 4000);
+    setTimeout(() => connect(code), delay);
   }
 
   copyBtn.addEventListener('click', () => {
@@ -649,9 +616,11 @@
   const params = new URLSearchParams(window.location.search);
   const room = params.get('room');
   if (room) {
-    startJoin(room.toUpperCase());
+    joinPanel.hidden = false;
+    connect(room.toUpperCase());
   } else {
-    startHost();
+    hostPanel.hidden = false;
+    connect(randomCode(5));
   }
 })();
 </script>
